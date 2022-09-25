@@ -5,14 +5,14 @@
 int main()
 {
     struct stack stk = {};
-    size_t cap = 0;
 
     StackCtor(&stk, 5);
 
-    stk.data = NULL;
+    for (int i = 0; i < 25; i++)
+        StackPush(&stk, i);
 
-    if (int errors = StackErr(stk))
-        StackDump(&stk, errors, __LINE__, __func__, __FILE__);
+    for (int i = 25; i > 0; i--)
+        printf("%d\n", StackPop(&stk));
 
     StackDetor(&stk);
 
