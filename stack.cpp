@@ -7,7 +7,7 @@
 #include "stack.h"
 
 FILE* logs = fopen("logs.txt", "w");
-const int POISON = 666;
+const int POISON = 66666;
 
 int StackCtor(struct stack* stk, size_t capacity)
 {
