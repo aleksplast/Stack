@@ -4,9 +4,13 @@
 #include "Config.h"
 
 struct stack{
+    unsigned long long canaryleft;
+    unsigned long long* dataguardl;
     elem_t* data;
+    unsigned long long* dataguardr;
     size_t size;
     size_t capacity;
+    unsigned long long canaryright;
 };
 
 enum StackErrors{
@@ -15,7 +19,8 @@ enum StackErrors{
     DATAERR = 2,
     SIZERR = 4,
     CAPERR = 8,
-    SIZENCAPERR = 16
+    SIZENCAPERR = 16,
+    CANERR = 32
 };
 
 enum SysErrors{
@@ -40,14 +45,24 @@ int StackDump(struct stack* stk, int errors, int line, const char* func, const c
 
 int StackDetor(struct stack* stk);
 
-int print(long x);
+int print(FILE* fp, long x);
 
-int print(char* x);
+int print(FILE* fp, char* x);
 
-int print(char x);
+int print(FILE* fp, char x);
 
-int print(double x);
+int print(FILE* fp, double x);
 
-int print(int x);
+int print(FILE* fp, int x);
+
+double GetPoison(double x);
+
+int GetPoison(int x);
+
+char GetPoison(char x);
+
+long GetPoison(long x);
+
+char* GetPoison(char* x);
 
 #endif //STACK_H

@@ -4,7 +4,7 @@
 
 int main()
 {
-    struct stack stk = {};
+    struct stack stk;
 
     StackCtor(&stk, 5);
 

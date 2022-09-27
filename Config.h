@@ -3,6 +3,7 @@
 
 #include <stdio.h>
 
-typedef int elem_t;
+typedef double elem_t;
+const unsigned long long CANARY = 0xBADC0FFEE;
 
 #endif //CONFIG_H

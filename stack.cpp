@@ -7,18 +7,29 @@
 #include "stack.h"
 
 FILE* logs = fopen("logs.txt", "w");
-const int POISON = 666;
 
 int StackCtor(struct stack* stk, size_t capacity)
 {
     if (stk == NULL)
         return STACKPTRERR;
 
-    stk->capacity = capacity;
-    stk->data = (elem_t*) calloc(capacity, sizeof(elem_t));
-    stk->size = 0;
+    char* buffer = (char*) calloc(1, capacity * sizeof(elem_t) + 2 * sizeof(unsigned long long));
 
-    FillWPoison(stk, 0, stk->capacity);
+    if (buffer == NULL)
+        return MEMERR;
+
+    stk->dataguardl = (unsigned long long*) buffer;
+    stk->dataguardl[0] = CANARY;
+    stk->data = (elem_t*) (buffer + sizeof(unsigned long long));
+    stk->dataguardr = (unsigned long long*) (buffer + sizeof(unsigned long long) + capacity * sizeof(elem_t));
+    stk->dataguardr[0] = CANARY;
+
+    stk->canaryleft = CANARY;
+    stk->capacity = capacity;
+    stk->size = 0;
+    stk->canaryright = CANARY;
+
+    FillWPoison(stk, 0, (int)stk->capacity);
 
     return NOERR;
 }
@@ -30,7 +41,8 @@ int FillWPoison(struct stack* stk, int left, int right)
 
     for (int i = left; i < right; i++)
     {
-        stk->data[i] = POISON;
+        printf("%d", i);
+        stk->data[i] = GetPoison(stk->data[0]);
     }
 
     return NOERR;
@@ -45,7 +57,7 @@ elem_t StackPop(struct stack* stk)
 
     stk->size--;
     elem_t value = stk->data[stk->size];
-    stk->data[stk->size] = POISON;
+    stk->data[stk->size] = GetPoison(stk->data[0]);
 
     if (stk->size < stk->capacity/2 - stk->capacity/8)
     {
@@ -86,12 +98,20 @@ int StackRealloc(struct stack* stk)
     if (stk == NULL)
         return STACKPTRERR;
 
-    elem_t* prev = stk->data;
+    char* prev = (char*) stk->dataguardl;
 
-    if ((stk->data = (elem_t*) realloc(stk->data, stk->capacity * sizeof(elem_t))) == NULL)
+    char* buffer = (char*) realloc(stk->dataguardl, (stk->capacity) * sizeof(elem_t) + 2 * sizeof(unsigned long long));
+
+    if (buffer == NULL)
         return MEMERR;
 
-    if (prev != stk->data)
+    stk->dataguardl = (unsigned long long*) buffer;
+    stk->dataguardl[0] = CANARY;
+    stk->data = (elem_t*)(buffer + sizeof(unsigned long long));
+    stk->dataguardr = (unsigned long long*) (buffer + sizeof(unsigned long long) + stk->capacity * sizeof(elem_t));
+    stk->dataguardr[0] = CANARY;
+
+    if (prev != (char*) stk->dataguardl)
         free(prev);
 
     return NOERR;
@@ -102,8 +122,16 @@ int StackShrink(struct stack* stk)
     if (stk == NULL)
         return STACKPTRERR;
 
-    if ((stk->data = (elem_t*) realloc(stk->data, stk->capacity * sizeof(elem_t))) == NULL)
+    char* buffer = (char*) realloc(stk->dataguardl, (stk->capacity) * sizeof(elem_t) + 2 * sizeof(unsigned long long));
+
+    if (buffer == NULL)
         return MEMERR;
+
+    stk->dataguardl = (unsigned long long*) buffer;
+    stk->dataguardl[0] = CANARY;
+    stk->data = (elem_t*)(buffer + sizeof(unsigned long long));
+    stk->dataguardr = (unsigned long long*) (buffer + sizeof(unsigned long long) + stk->capacity * sizeof(elem_t));
+    stk->dataguardr[0] = CANARY;
 
     return NOERR;
 }
@@ -122,12 +150,16 @@ int StackErr(struct stack stk)
         errors |= CAPERR;
     if (stk.size > stk.capacity)
         errors |= SIZENCAPERR;
+    if (stk.canaryleft != CANARY || stk.canaryright != CANARY || stk.dataguardl[0] != CANARY || stk.dataguardr[0] != CANARY)
+        errors |= CANERR;
 
     return errors;
 }
 
 int StackDump(struct stack* stk, int errors, int line, const char* func, const char* file)
 {
+    FILE* logs = fopen("logs.txt", "a");
+
     if (stk == NULL)
     {
         fprintf(logs, "ERROR: NULL Pointer to a stack");
@@ -149,10 +181,10 @@ int StackDump(struct stack* stk, int errors, int line, const char* func, const c
     {
         for (int i = 0; i < stk->capacity; i++)
         {
-            if (stk->data[i] != POISON)
+            if (stk->data[i] != GetPoison(stk->data[0]) && !isnan(stk->data[i]))
             {
                 fprintf(logs, "\t\t*[%d] = ", i);
-                print(stk->data[i]);
+                print(logs, stk->data[i]);
             }
             else
                 fprintf(logs, "\t\t[%d] = POISON\n", i);
@@ -160,6 +192,8 @@ int StackDump(struct stack* stk, int errors, int line, const char* func, const c
     }
     fprintf(logs, "\t}\n");
     fprintf(logs, "}\n");
+
+    fclose(logs);
 
     return NOERR;
 }
@@ -171,34 +205,66 @@ int StackDetor(struct stack* stk)
         return STACKPTRERR;
     }
 
+    stk->canaryleft = 0;
+    stk->canaryright = 0;
     stk->capacity = 0xDED32DED;
+    free(stk->dataguardl);
     stk->data = NULL;
+    stk->dataguardl = NULL;
+    stk->dataguardr = NULL;
     stk->size = -1;
 
     return NOERR;
 }
 
-int print(int x)
+int print(FILE* fp, int x)
 {
-    fprintf(logs, "%d\n", x);
+    return fprintf(fp, "%d\n", x);
 }
 
-int print(double x)
+int print(FILE* fp, double x)
 {
-    fprintf(logs, "%lg\n", x);
+    return fprintf(fp, "%lg\n", x);
 }
 
-int print(char x)
+int print(FILE* fp, char x)
 {
-    fprintf(logs, "%c\n", x);
+    return fprintf(fp, "%c\n", x);
 }
 
-int print(char* x)
+int print(FILE* fp, char* x)
 {
-    fprintf(logs, "%p\n", x);
+    return fprintf(fp, "%p\n", x);
 }
 
-int print(long x)
+int print(FILE* fp, long x)
 {
-    fprintf(logs, "%ld\n", x);
+    return fprintf(fp, "%ld\n", x);
 }
+
+double GetPoison(double x)
+{
+    return NAN;
+}
+
+int GetPoison(int x)
+{
+    return 0xDED32DED;
+}
+
+char GetPoison(char x)
+{
+    return '\0';
+}
+
+char* GetPoison(char* x)
+{
+    return NULL;
+}
+
+long GetPoison(long x)
+{
+    return 0xDED32DED;
+}
+
+
