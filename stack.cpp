@@ -6,30 +6,46 @@
 #include "Config.h"
 #include "stack.h"
 
-FILE* logs = fopen("logs.txt", "w");
+#define DEBUG
+
+#ifndef DEBUG
+#define DBG if(false)
+#else
+#define DBG if(true)
+#endif
+
+#define DataInit    stk->dataguardl = (unsigned long long*) buffer;                                                                 \
+                    stk->dataguardl[0] = CANARY;                                                                                    \
+                    stk->data = (elem_t*) (buffer + sizeof(unsigned long long));                                                    \
+                    stk->dataguardr = (unsigned long long*) (buffer + sizeof(unsigned long long) + stk->capacity * sizeof(elem_t)); \
+                    stk->dataguardr[0] = CANARY;
 
 int StackCtor(struct stack* stk, size_t capacity)
 {
     if (stk == NULL)
-        return STACKPTRERR;
+        return STKPTRERR;
 
     char* buffer = (char*) calloc(1, capacity * sizeof(elem_t) + 2 * sizeof(unsigned long long));
 
     if (buffer == NULL)
         return MEMERR;
 
-    stk->dataguardl = (unsigned long long*) buffer;
-    stk->dataguardl[0] = CANARY;
-    stk->data = (elem_t*) (buffer + sizeof(unsigned long long));
-    stk->dataguardr = (unsigned long long*) (buffer + sizeof(unsigned long long) + capacity * sizeof(elem_t));
-    stk->dataguardr[0] = CANARY;
+    stk->capacity = capacity;
+
+    DataInit
 
     stk->canaryleft = CANARY;
-    stk->capacity = capacity;
     stk->size = 0;
     stk->canaryright = CANARY;
 
     FillWPoison(stk, 0, (int)stk->capacity);
+
+    UpdateHash(stk);
+
+    if (int errors = StackErr(stk))
+        DBG StackDump(stk, errors);
+
+    UpdateHash(stk);
 
     return NOERR;
 }
@@ -37,11 +53,10 @@ int StackCtor(struct stack* stk, size_t capacity)
 int FillWPoison(struct stack* stk, int left, int right)
 {
     if (stk == NULL)
-        return STACKPTRERR;
+        return STKPTRERR;
 
     for (int i = left; i < right; i++)
     {
-        printf("%d", i);
         stk->data[i] = GetPoison(stk->data[0]);
     }
 
@@ -51,9 +66,10 @@ int FillWPoison(struct stack* stk, int left, int right)
 elem_t StackPop(struct stack* stk)
 {
     if (stk == NULL)
-        return STACKPTRERR;
+        return STKPTRERR;
 
-    int errors = StackErr(*stk);
+    if (int errors = StackErr(stk))
+        DBG StackDump(stk, errors, __LINE__, __func__, __FILE__);
 
     stk->size--;
     elem_t value = stk->data[stk->size];
@@ -65,7 +81,7 @@ elem_t StackPop(struct stack* stk)
         StackShrink(stk);
     }
 
-    StackDump(stk, errors, __LINE__, __func__, __FILE__);
+    UpdateHash(stk);
 
     return value;
 }
@@ -73,10 +89,10 @@ elem_t StackPop(struct stack* stk)
 int StackPush(struct stack* stk, elem_t elem)
 {
     if (stk == NULL)
-        return STACKPTRERR;
+        return STKPTRERR;
 
-    int errors = StackErr(*stk);
-    StackDump(stk, errors, __LINE__, __func__, __FILE__);
+    if (int errors = StackErr(stk))
+        DBG StackDump(stk, errors, __LINE__, __func__, __FILE__);
 
     if (stk->size >= stk->capacity)
     {
@@ -87,8 +103,7 @@ int StackPush(struct stack* stk, elem_t elem)
 
     stk->data[stk->size++] = elem;
 
-    errors = StackErr(*stk);
-    StackDump(stk, errors, __LINE__, __func__, __FILE__);
+    UpdateHash(stk);
 
     return NOERR;
 }
@@ -96,7 +111,7 @@ int StackPush(struct stack* stk, elem_t elem)
 int StackRealloc(struct stack* stk)
 {
     if (stk == NULL)
-        return STACKPTRERR;
+        return STKPTRERR;
 
     char* prev = (char*) stk->dataguardl;
 
@@ -105,11 +120,7 @@ int StackRealloc(struct stack* stk)
     if (buffer == NULL)
         return MEMERR;
 
-    stk->dataguardl = (unsigned long long*) buffer;
-    stk->dataguardl[0] = CANARY;
-    stk->data = (elem_t*)(buffer + sizeof(unsigned long long));
-    stk->dataguardr = (unsigned long long*) (buffer + sizeof(unsigned long long) + stk->capacity * sizeof(elem_t));
-    stk->dataguardr[0] = CANARY;
+    DataInit
 
     if (prev != (char*) stk->dataguardl)
         free(prev);
@@ -120,38 +131,41 @@ int StackRealloc(struct stack* stk)
 int StackShrink(struct stack* stk)
 {
     if (stk == NULL)
-        return STACKPTRERR;
+        return STKPTRERR;
 
     char* buffer = (char*) realloc(stk->dataguardl, (stk->capacity) * sizeof(elem_t) + 2 * sizeof(unsigned long long));
 
     if (buffer == NULL)
         return MEMERR;
 
-    stk->dataguardl = (unsigned long long*) buffer;
-    stk->dataguardl[0] = CANARY;
-    stk->data = (elem_t*)(buffer + sizeof(unsigned long long));
-    stk->dataguardr = (unsigned long long*) (buffer + sizeof(unsigned long long) + stk->capacity * sizeof(elem_t));
-    stk->dataguardr[0] = CANARY;
+    DataInit
 
     return NOERR;
 }
 
-int StackErr(struct stack stk)
+int StackErr(struct stack* stk)
 {
     int errors = 0;
+    unsigned int prevhash = stk->structhash;
+    stk->structhash = 0;
 
-    if (&stk == NULL)
-        return STACKPTRERR;
-    if (stk.data == NULL)
+    if (stk == NULL)
+        return STKPTRERR;
+
+    if (stk->data == NULL)
         errors |= DATAERR;
-    if (stk.size < 0 || isnan(stk.size))
+    if (stk->size < 0 || isnan(stk->size))
         errors |= SIZERR;
-    if (stk.capacity < 0 || isnan(stk.capacity))
+    if (stk->capacity < 0 || isnan(stk->capacity))
         errors |= CAPERR;
-    if (stk.size > stk.capacity)
+    if (stk->size > stk->capacity)
         errors |= SIZENCAPERR;
-    if (stk.canaryleft != CANARY || stk.canaryright != CANARY || stk.dataguardl[0] != CANARY || stk.dataguardr[0] != CANARY)
+    if (stk->canaryleft != CANARY || stk->canaryright != CANARY || stk->dataguardl[0] != CANARY || stk->dataguardr[0] != CANARY)
         errors |= CANERR;
+    if (MurMurHash(stk->data, stk->capacity * sizeof(elem_t), Seed) != stk->datahash)
+        errors |= HASHERR;
+    if (MurMurHash(stk, sizeof(*stk), Seed) != prevhash)
+        errors |= HASHERR;
 
     return errors;
 }
@@ -160,11 +174,7 @@ int StackDump(struct stack* stk, int errors, int line, const char* func, const c
 {
     FILE* logs = fopen("logs.txt", "a");
 
-    if (stk == NULL)
-    {
-        fprintf(logs, "ERROR: NULL Pointer to a stack");
-        return STACKPTRERR;
-    }
+    assert(stk != NULL);
 
     fprintf(logs, "\n%s at ", func);
     fprintf(logs, "%s", file);
@@ -201,9 +211,10 @@ int StackDump(struct stack* stk, int errors, int line, const char* func, const c
 int StackDetor(struct stack* stk)
 {
     if (stk == NULL)
-    {
-        return STACKPTRERR;
-    }
+        return STKPTRERR;
+
+    if (int errors = StackErr(stk))
+        DBG StackDump(stk, errors, __LINE__, __func__, __FILE__);
 
     stk->canaryleft = 0;
     stk->canaryright = 0;
@@ -213,8 +224,77 @@ int StackDetor(struct stack* stk)
     stk->dataguardl = NULL;
     stk->dataguardr = NULL;
     stk->size = -1;
+    stk->datahash = 0;
+    stk->structhash = 0;
 
     return NOERR;
+}
+
+int DataFill(struct stack* stk, char* buffer)
+{
+    if (stk == NULL)
+        return STKPTRERR;
+
+    stk->dataguardl = (unsigned long long*) buffer;
+    stk->dataguardl[0] = CANARY;
+    stk->data = (elem_t*) (buffer + sizeof(unsigned long long));
+    stk->dataguardr = (unsigned long long*) (buffer + sizeof(unsigned long long) + stk->capacity * sizeof(elem_t));
+    stk->dataguardr[0] = CANARY;
+
+    return NOERR;
+}
+
+unsigned int MurMurHash(const void* data, int lenght, unsigned int seed)
+{
+    const int shift = 24;
+    const unsigned int base = 0x5bd1e995;
+
+    unsigned int hash = seed ^ lenght;
+
+    const unsigned char* buffer = (const unsigned char*) data;
+
+    while(lenght >= 4)
+    {
+        unsigned int curr = *(unsigned int*) buffer;
+
+        curr *= base;
+        curr ^= curr >> shift;
+        curr *= base;
+
+        hash *= base;
+        hash ^= curr;
+
+        buffer += 4;
+        lenght -= 4;
+    }
+
+    switch (lenght)
+    {
+        case 3:
+            hash ^= buffer[2] << 16;
+        case 2:
+            hash ^= buffer[1] << 8;
+        case 1:
+            hash ^= buffer[0];
+            hash *= base;
+    };
+
+    hash ^= hash >> 13;
+    hash *= base;
+    hash ^= hash >> 15;
+
+    return hash;
+}
+
+void UpdateHash(struct stack* stk)
+{
+    assert(stk != NULL);
+
+    stk->datahash = 0;
+    stk->structhash = 0;
+
+    stk->datahash = MurMurHash(stk->data, stk->capacity * sizeof(elem_t), Seed);
+    stk->structhash = MurMurHash(stk, sizeof(*stk), Seed);
 }
 
 int print(FILE* fp, int x)
@@ -266,5 +346,3 @@ long GetPoison(long x)
 {
     return 0xDED32DED;
 }
-
-

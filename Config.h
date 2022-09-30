@@ -3,7 +3,7 @@
 
 #include <stdio.h>
 
-typedef double elem_t;
 const unsigned long long CANARY = 0xBADC0FFEE;
+const unsigned int Seed = 33;
 
 #endif //CONFIG_H

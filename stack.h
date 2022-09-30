@@ -3,6 +3,8 @@
 
 #include "Config.h"
 
+typedef int elem_t;
+
 struct stack{
     unsigned long long canaryleft;
     unsigned long long* dataguardl;
@@ -10,17 +12,20 @@ struct stack{
     unsigned long long* dataguardr;
     size_t size;
     size_t capacity;
+    unsigned int datahash;
+    unsigned int structhash;
     unsigned long long canaryright;
 };
 
 enum StackErrors{
     NOERR = 0,
-    STACKPTRERR = 1,
+    STKPTRERR = 1,
     DATAERR = 2,
     SIZERR = 4,
     CAPERR = 8,
     SIZENCAPERR = 16,
-    CANERR = 32
+    CANERR = 32,
+    HASHERR = 64
 };
 
 enum SysErrors{
@@ -39,11 +44,17 @@ int StackRealloc(struct stack* stk);
 
 int StackShrink(struct stack* stk);
 
-int StackErr(struct stack stk);
+int StackErr(struct stack* stk);
 
 int StackDump(struct stack* stk, int errors, int line, const char* func, const char* file);
 
 int StackDetor(struct stack* stk);
+
+int DataFill(struct stack* stk, char* buffer);
+
+unsigned int MurMurHash(const void* data, int lenght, unsigned int seed);
+
+void UpdateHash(struct stack* stk);
 
 int print(FILE* fp, long x);
 

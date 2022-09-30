@@ -4,6 +4,8 @@
 
 int main()
 {
+    FILE* logs = fopen("logs.txt", "w");
+
     struct stack stk;
 
     StackCtor(&stk, 5);
@@ -15,6 +17,8 @@ int main()
         printf("%d\n", StackPop(&stk));
 
     StackDetor(&stk);
+
+    fclose(logs);
 
     return 0;
 }
